@@ -19,8 +19,10 @@ import {
   fetchUpDownMarketAtWindow,
   parseMarketSeries,
   NEXT_WINDOW_PREFETCH_SEC,
+  upDownSlugFromSeriesWindow,
 } from "./market-pair.js";
 import { pickDisplayPrice } from "./quote-price.js";
+import { bookSidesKey, makeBookLine, type ClobBookLine } from "./clob-book-line.js";
 import { makeStoredTickId, roundTo4 } from "./tick-compact.js";
 import {
   createWindowDynamicsTracker,
@@ -33,14 +35,13 @@ import {
 import { logService } from "./log-service.js";
 import type {
   ChainlinkTickDocument,
-  ClobRawTickDocument,
   MarketDocument,
   WindowHitRecord,
 } from "./types.js";
 import {
+  appendClobBookLines,
   ensureWindowTickDir,
   insertChainlinkTicks,
-  insertClobRawTicks,
 } from "./db/tick-repository.js";
 import {
   deleteWindowJsonlTicks,
@@ -103,7 +104,10 @@ export class MarketRecorder {
   private activeYesTokenId: string | null = null;
   private activeNoTokenId: string | null = null;
   private dynamicsTracker: WindowDynamicsTracker = createWindowDynamicsTracker();
-  private clobRawBuffer: ClobRawTickDocument[] = [];
+  private clobBookBuffer: ClobBookLine[] = [];
+  private lastBookSidesKey = "";
+  /** Raw messages before the REST open seed must not become the first book line. */
+  private bookOpenSeeded = false;
   private chainlinkTickBuffer: ChainlinkTickDocument[] = [];
   private clobRawSeq = 0;
   private chainlinkSeq = 0;
@@ -268,7 +272,7 @@ export class MarketRecorder {
     }, TICK_FLUSH_MS);
 
     this.clobRawUnsub = clobMarketFeed.onRawMessage((event) => {
-      this.recordClobRawMessage(event);
+      this.recordClobBookUpdate(event);
     });
 
     this.chainlinkUnsub = chainlinkPriceFeed.onUpdate((updatedAsset) => {
@@ -284,7 +288,8 @@ export class MarketRecorder {
     void this.resumePendingTickPublish();
   }
 
-  stop(): void {
+  /** Resolves once buffered ticks are on disk — await it before process exit. */
+  stop(): Promise<void> {
     if (this.fastRetryTimer) {
       clearTimeout(this.fastRetryTimer);
       this.fastRetryTimer = null;
@@ -309,11 +314,57 @@ export class MarketRecorder {
       this.chainlinkTwapUnsub();
       this.chainlinkTwapUnsub = null;
     }
-    void this.flushTicks();
+    // flushTicks drains the buffers synchronously before its first await, so
+    // resetActiveWindow below cannot drop the batch it is writing.
+    const flushed = this.flushTicks().catch((err) => {
+      logService.error(
+        "recorder",
+        `Final tick flush failed (${this.market._id}): ${String(err)}`,
+      );
+    });
     this.resetActiveWindow();
     this.finalizedWindowStarts.clear();
     this.discardedWindowStarts.clear();
     logService.info("recorder", `Recording stopped for ${this.market._id}`);
+    return flushed;
+  }
+
+  /**
+   * Graceful process shutdown: if the active window has already ended, finalize
+   * it (save header, publish / schedule zst) instead of leaving it for the next
+   * start's resume pass. Then stop and wait for the final tick flush.
+   */
+  async shutdown(): Promise<void> {
+    // No new samples: a rollover here must not open the next window.
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
+    }
+    if (this.fastRetryTimer) {
+      clearTimeout(this.fastRetryTimer);
+      this.fastRetryTimer = null;
+    }
+    try {
+      if (this.rollingInFlight) {
+        await this.rollingInFlight;
+      } else if (
+        this.activeWindow &&
+        !this.finalizing &&
+        Math.floor(Date.now() / 1000) >= this.activeWindow.windowEnd
+      ) {
+        logService.info(
+          "recorder",
+          `Shutdown: finalizing ended window ${this.activeWindow.windowStart} for ${this.market._id}`,
+        );
+        await this.rollClosedWindow();
+      }
+    } catch (err) {
+      logService.error(
+        "recorder",
+        `Shutdown finalize failed (${this.market._id}): ${String(err)}`,
+      );
+    }
+    await this.stop();
   }
 
   /**
@@ -328,7 +379,7 @@ export class MarketRecorder {
     this.discardedWindowStarts.add(windowStart);
     void deleteRecordedWindowSummary(this.market._id, windowStart).catch(() => undefined);
 
-    this.clobRawBuffer = [];
+    this.clobBookBuffer = [];
     this.chainlinkTickBuffer = [];
     this.resetActiveWindow();
     void this.purgeWindowArtifacts(windowStart);
@@ -362,7 +413,9 @@ export class MarketRecorder {
     this.activeYesTokenId = null;
     this.activeNoTokenId = null;
     this.dynamicsTracker = createWindowDynamicsTracker();
-    this.clobRawBuffer = [];
+    this.clobBookBuffer = [];
+    this.lastBookSidesKey = "";
+    this.bookOpenSeeded = false;
     this.chainlinkTickBuffer = [];
     this.clobRawSeq = 0;
     this.chainlinkSeq = 0;
@@ -442,17 +495,13 @@ export class MarketRecorder {
     return tMs >= startMs && tMs < endMs;
   }
 
-  private nextClobRawId(windowStart: number): string {
-    this.clobRawSeq += 1;
-    return makeStoredTickId(windowStart, this.clobRawSeq).replace(":", ":raw:");
-  }
-
   private nextChainlinkId(windowStart: number): string {
     this.chainlinkSeq += 1;
     return makeStoredTickId(windowStart, this.chainlinkSeq).replace(":", ":cl:");
   }
 
-  private recordClobRawMessage(event: {
+  /** Health still counts socket messages. Replay stores the top-5 book, not the payload. */
+  private recordClobBookUpdate(event: {
     tMs: number;
     payload: unknown;
     tokenIds: string[];
@@ -465,16 +514,35 @@ export class MarketRecorder {
     );
     if (!relevant) return;
 
-    this.clobRawBuffer.push({
-      _id: this.nextClobRawId(this.activeWindow.windowStart),
-      windowStart: this.activeWindow.windowStart,
-      windowEnd: this.activeWindow.windowEnd,
-      tMs: event.tMs,
-      payload: event.payload,
-    });
     this.clobRawCount += 1;
     this.noteClobTick(event.tMs);
+    if (this.bookOpenSeeded) this.captureBookLine(event.tMs);
     this.onStateChange?.(this.market._id);
+  }
+
+  private captureBookLine(tMs: number): void {
+    if (!this.activeYesTokenId || !this.activeNoTokenId) return;
+    const yes = clobMarketFeed.getCachedMarketInfo(this.activeYesTokenId);
+    const no = clobMarketFeed.getCachedMarketInfo(this.activeNoTokenId);
+    const line = makeBookLine(tMs, yes?.bids, yes?.asks, no?.bids, no?.asks);
+    const key = bookSidesKey(line);
+    if (key === this.lastBookSidesKey) return;
+    const empty =
+      line.yesBids.length === 0 &&
+      line.yesAsks.length === 0 &&
+      line.noBids.length === 0 &&
+      line.noAsks.length === 0;
+    if (empty) return;
+    this.lastBookSidesKey = key;
+    this.clobBookBuffer.push(line);
+  }
+
+  /** REST seed at open so the first book line already has asks. */
+  private async seedActiveBook(): Promise<void> {
+    if (!this.activeYesTokenId || !this.activeNoTokenId) return;
+    await clobMarketFeed.seedBooksFromRest([this.activeYesTokenId, this.activeNoTokenId]);
+    this.captureBookLine(Date.now());
+    this.bookOpenSeeded = true;
   }
 
   private buildChainlinkTick(tMs: number): ChainlinkTickDocument | null {
@@ -677,22 +745,28 @@ export class MarketRecorder {
   }
 
   private async flushTicks(): Promise<void> {
-    const rawBatch = this.clobRawBuffer.splice(0, this.clobRawBuffer.length);
+    const bookWindowStart = this.activeWindow?.windowStart;
+    const bookBatch = this.clobBookBuffer.splice(0, this.clobBookBuffer.length);
     const chainlinkBatch = this.chainlinkTickBuffer.splice(0, this.chainlinkTickBuffer.length);
-    if (rawBatch.length === 0 && chainlinkBatch.length === 0) return;
+    if (bookBatch.length > 0 && bookWindowStart == null) {
+      this.clobBookBuffer.unshift(...bookBatch);
+    }
+    if ((bookWindowStart == null || bookBatch.length === 0) && chainlinkBatch.length === 0) return;
 
-    const [rawResult, chainlinkResult] = await Promise.allSettled([
-      rawBatch.length > 0 ? insertClobRawTicks(this.market, rawBatch) : Promise.resolve(),
+    const [bookResult, chainlinkResult] = await Promise.allSettled([
+      bookBatch.length > 0 && bookWindowStart != null
+        ? appendClobBookLines(this.market, bookWindowStart, bookBatch)
+        : Promise.resolve(),
       chainlinkBatch.length > 0
         ? insertChainlinkTicks(this.market, chainlinkBatch)
         : Promise.resolve(),
     ]);
-    if (rawResult.status === "rejected") {
+    if (bookResult.status === "rejected") {
       logService.error(
         "recorder",
-        `CLOB tick flush failed (${this.market._id}): ${String(rawResult.reason)}`,
+        `CLOB book flush failed (${this.market._id}): ${String(bookResult.reason)}`,
       );
-      this.clobRawBuffer.unshift(...rawBatch);
+      this.clobBookBuffer.unshift(...bookBatch);
     }
     if (chainlinkResult.status === "rejected") {
       logService.error(
@@ -729,7 +803,9 @@ export class MarketRecorder {
     this.windowTickCount = 0;
     this.clobRawCount = 0;
     this.chainlinkCount = 0;
-    this.clobRawBuffer = [];
+    this.clobBookBuffer = [];
+    this.lastBookSidesKey = "";
+    this.bookOpenSeeded = false;
     this.chainlinkTickBuffer = [];
     this.assetPrices = {};
     this.gammaSettled = false;
@@ -742,6 +818,7 @@ export class MarketRecorder {
     this.resetPricePathTracker();
     if (meta.yesTokenId && meta.noTokenId) {
       this.subscribeWindowTokens(meta.yesTokenId, meta.noTokenId);
+      await this.seedActiveBook();
     }
     await this.hydrateActiveWindowFromMongo(windowStart);
     this.headerReady = true;
@@ -872,11 +949,14 @@ export class MarketRecorder {
         continue;
       }
 
-      if (typeof win.slug === "string" && win.slug.trim()) {
+      const slug =
+        (typeof win.slug === "string" && win.slug.trim()) ||
+        upDownSlugFromSeriesWindow(this.market._id, win.windowStart);
+      if (slug) {
         this.scheduleBackgroundOfficialResolve({
           windowStart: win.windowStart,
           windowEnd: win.windowEnd,
-          slug: win.slug,
+          slug,
         });
       }
     }
@@ -1066,6 +1146,7 @@ export class MarketRecorder {
     try {
       const pair = await fetchUpDownMarketAtWindow(this.market._id, nextStart);
       clobMarketFeed.ensureSubscribed([pair.yesTokenId, pair.noTokenId]);
+      await clobMarketFeed.seedBooksFromRest([pair.yesTokenId, pair.noTokenId]);
       this.prefetchedNextWindowStart = nextStart;
       logService.info(
         "recorder",

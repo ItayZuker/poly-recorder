@@ -7,9 +7,11 @@ Do **not** record the same series on dest and this app at the same time (they wo
 ## Setup
 
 1. Copy `.env.example` to `.env`
-2. Set `MONGODB_URI` (same cluster as dest / CRM) and `DATA_DIR` (where tick files go — dest Replay reads this folder)
-3. `npm install`
+2. Set `MONGODB_URI` (same cluster as dest / CRM) and `DATA_DIR` (where tick files go — dest Replay reads this folder, e.g. `/mnt/poly-data` on the shared EFS mount). A configured `DATA_DIR` must already exist; the recorder refuses to create it so an unmounted volume cannot silently redirect ticks to local disk.
+3. `npm install` (Node 22+)
 4. `npm start` — http://localhost:3849
+
+For the Linux / systemd deployment see [docs/deploy-linux.md](docs/deploy-linux.md).
 
 ## UI
 
@@ -24,5 +26,5 @@ Do **not** record the same series on dest and this app at the same time (they wo
 |----------|---------|
 | `MONGODB_URI` | Shared Mongo |
 | `MONGODB_DB` | Default `poly_recorder` |
-| `DATA_DIR` | Tick / window files |
+| `DATA_DIR` | Tick / window files (must exist; e.g. `/mnt/poly-data`) |
 | `PORT` | Default `3849` |

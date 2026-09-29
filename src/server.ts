@@ -27,7 +27,18 @@ function parseSeries(raw: unknown): string {
   return series;
 }
 
+/** Fail fast on missing config instead of logging "sync failed" every 30s forever. */
+function assertRequiredEnv(): void {
+  if (!process.env.MONGODB_URI?.trim()) {
+    console.error(
+      "Fatal: MONGODB_URI is not set. Put it in .env (or the systemd EnvironmentFile) and restart.",
+    );
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
+  assertRequiredEnv();
   await initStorage();
   await Promise.all(SEED_MARKETS.map((m) => ensureMarketDirs(m.series)));
   const backfilled = await backfillLocalWindowsToMongo();
@@ -124,14 +135,33 @@ async function main(): Promise<void> {
     }, 30_000).unref?.();
   });
 
-  const shutdown = async () => {
+  // Must finish well inside systemd TimeoutStopSec (30s); hard-exit if it does not.
+  const SHUTDOWN_HARD_EXIT_MS = 25_000;
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) {
+      logService.warn("server", `${signal} received again — shutdown already in progress`);
+      return;
+    }
+    shuttingDown = true;
+    logService.info("server", `${signal} received — finalizing and flushing before exit`);
+    setTimeout(() => {
+      console.error("Shutdown did not finish in time; exiting anyway");
+      process.exit(1);
+    }, SHUTDOWN_HARD_EXIT_MS).unref();
+
     stopArchiveScheduler();
-    recordingManager.stopAll();
+    try {
+      await recordingManager.shutdownAll();
+    } catch (err) {
+      logService.error("server", `Shutdown error: ${String(err)}`);
+    }
     await closeMongoClient().catch(() => {});
+    logService.info("server", "Shutdown complete");
     process.exit(0);
   };
-  process.on("SIGINT", () => void shutdown());
-  process.on("SIGTERM", () => void shutdown());
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
 main().catch((err) => {

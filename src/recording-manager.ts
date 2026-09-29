@@ -160,7 +160,7 @@ export class RecordingManager {
   /** Start/stop recorders from each market's `recordingEnabled` flag. */
   async sync(): Promise<void> {
     if (!canProcessRecord()) {
-      this.stopAll();
+      await this.stopAll();
       return;
     }
 
@@ -174,7 +174,7 @@ export class RecordingManager {
 
     for (const [series, recorder] of this.recorders) {
       if (!enabled.has(series)) {
-        recorder.stop();
+        void recorder.stop();
         this.recorders.delete(series);
         logService.info("recorder", `Recording stopped for ${series}`);
       }
@@ -195,7 +195,7 @@ export class RecordingManager {
     if (!canProcessRecord()) {
       const existing = this.recorders.get(market._id);
       if (existing) {
-        existing.stop();
+        void existing.stop();
         this.recorders.delete(market._id);
       }
       return;
@@ -207,7 +207,7 @@ export class RecordingManager {
     if (market.recordingEnabled) {
       this.ensureFeedsStarted();
       if (existing) {
-        existing.stop();
+        void existing.stop();
         this.recorders.delete(market._id);
       }
       const recorder = new MarketRecorder(market, (s) => this.onChange?.(s));
@@ -215,7 +215,7 @@ export class RecordingManager {
       this.recorders.set(market._id, recorder);
       logService.info("recorder", `Recording started for ${market._id}`);
     } else if (existing) {
-      existing.stop();
+      void existing.stop();
       this.recorders.delete(market._id);
       logService.info("recorder", `Recording stopped for ${market._id}`);
     }
@@ -230,7 +230,22 @@ export class RecordingManager {
     return this.recorders.get(series)?.getActiveWindow() ?? null;
   }
 
-  stopAll(): void {
+  /** Stop every recorder; resolves once their final tick flushes are on disk. */
+  async stopAll(): Promise<void> {
+    await this.teardown((recorder) => recorder.stop());
+  }
+
+  /**
+   * Process shutdown (SIGTERM): finalize windows that already ended, flush
+   * buffered ticks, then close the feeds. Await before exiting.
+   */
+  async shutdownAll(): Promise<void> {
+    await this.teardown((recorder) => recorder.shutdown());
+  }
+
+  private async teardown(
+    stopRecorder: (recorder: MarketRecorder) => Promise<void>,
+  ): Promise<void> {
     if (this.stallUnsub) {
       this.stallUnsub();
       this.stallUnsub = null;
@@ -240,10 +255,9 @@ export class RecordingManager {
       this.healthTimer = null;
     }
     this.recoveryInFlight = false;
-    for (const recorder of this.recorders.values()) {
-      recorder.stop();
-    }
+    const recorders = [...this.recorders.values()];
     this.recorders.clear();
+    await Promise.all(recorders.map((recorder) => stopRecorder(recorder)));
     clobMarketFeed.stop();
     chainlinkPriceFeed.stop();
   }

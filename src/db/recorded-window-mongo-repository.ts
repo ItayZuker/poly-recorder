@@ -1,5 +1,4 @@
 import type { PtbHistoryEntry, RecordedWindowDocument, WindowOutcome } from "../types.js";
-import { decodePtbHistory, encodePtbHistory } from "../ptb-history.js";
 import { getMongoClient, getMongoDbName } from "./mongo-client.js";
 
 const COLLECTION = "recorded_windows";
@@ -99,55 +98,60 @@ type MongoRecordedWindowDoc = {
   };
 };
 
+/** Fields Replay no longer reads. Removed from every header. */
+export const REMOVED_RECORDED_WINDOW_FIELDS = [
+  "question",
+  "slug",
+  "conditionId",
+  "marketSeries",
+  "yesTokenId",
+  "noTokenId",
+  "yesPrice",
+  "noPrice",
+  "uniqueTraders",
+  "newWallets",
+  "knownWallets",
+  "tickCount",
+  "clobRawCount",
+  "clobBookCount",
+  "chainlinkCount",
+  "ptbCrossings",
+  "assetGap",
+  "rangeTop",
+  "rangeBottom",
+  "assetRange",
+  "ptbHistory",
+  "updatedAt",
+  "window",
+] as const;
+
 const WINDOW_SUMMARY_PROJECTION = {
   _id: 1,
   series: 1,
-  marketSeries: 1,
   windowStart: 1,
   windowEnd: 1,
   savedAt: 1,
-  ptbCrossings: 1,
-  rangeTop: 1,
-  rangeBottom: 1,
-  uniqueTraders: 1,
-  newWallets: 1,
   windowOutcome: 1,
   minAssetPrice: 1,
   maxAssetPrice: 1,
-  assetRange: 1,
   prevCloseAsset: 1,
   assetPrice: 1,
-  ptbHistory: 1,
   gammaPtb: 1,
   ptbChainlink: 1,
   ptbTwap30: 1,
   ptbTwap60: 1,
-  slug: 1,
-  question: 1,
-  conditionId: 1,
-  yesPrice: 1,
-  noPrice: 1,
-  assetGap: 1,
-  tickCount: 1,
-  clobRawCount: 1,
-  clobBookCount: 1,
-  chainlinkCount: 1,
-  knownWallets: 1,
-  updatedAt: 1,
   "window.windowStart": 1,
   "window.windowEnd": 1,
   "window.savedAt": 1,
-  "window.ptbCrossings": 1,
-  "window.rangeTop": 1,
-  "window.rangeBottom": 1,
-  "window.uniqueTraders": 1,
-  "window.newWallets": 1,
   "window.windowOutcome": 1,
   "window.minAssetPrice": 1,
   "window.maxAssetPrice": 1,
-  "window.assetRange": 1,
   "window.prevCloseAsset": 1,
   "window.assetPrice": 1,
+  "window.gammaPtb": 1,
+  "window.ptbChainlink": 1,
+  "window.ptbTwap30": 1,
+  "window.ptbTwap60": 1,
 } as const;
 
 function seriesFromDoc(doc: MongoRecordedWindowDoc): string | null {
@@ -182,29 +186,15 @@ function normalizeDoc(doc: MongoRecordedWindowDoc): RecordedWindowSummary | null
     savedAt,
   };
 
-  const ptbCrossings = doc.ptbCrossings ?? nested?.ptbCrossings;
-  const rangeTop = doc.rangeTop ?? nested?.rangeTop;
-  const rangeBottom = doc.rangeBottom ?? nested?.rangeBottom;
-  const uniqueTraders = doc.uniqueTraders ?? nested?.uniqueTraders;
-  const newWallets = doc.newWallets ?? nested?.newWallets;
   const minAssetPrice = doc.minAssetPrice ?? nested?.minAssetPrice;
   const maxAssetPrice = doc.maxAssetPrice ?? nested?.maxAssetPrice;
-  const assetRange = doc.assetRange ?? nested?.assetRange;
   const prevCloseAsset = doc.prevCloseAsset ?? nested?.prevCloseAsset;
   const assetPrice = doc.assetPrice ?? nested?.assetPrice;
 
-  if (ptbCrossings != null) out.ptbCrossings = ptbCrossings;
-  if (rangeTop != null) out.rangeTop = rangeTop;
-  if (rangeBottom != null) out.rangeBottom = rangeBottom;
-  if (uniqueTraders != null) out.uniqueTraders = uniqueTraders;
-  if (newWallets != null) out.newWallets = newWallets;
   if (minAssetPrice != null && Number.isFinite(minAssetPrice)) out.minAssetPrice = minAssetPrice;
   if (maxAssetPrice != null && Number.isFinite(maxAssetPrice)) out.maxAssetPrice = maxAssetPrice;
-  if (assetRange != null && Number.isFinite(assetRange)) out.assetRange = assetRange;
   if (prevCloseAsset != null && Number.isFinite(prevCloseAsset)) out.prevCloseAsset = prevCloseAsset;
   if (assetPrice != null && Number.isFinite(assetPrice)) out.assetPrice = assetPrice;
-  const ptbHistory = decodePtbHistory(doc.ptbHistory);
-  if (ptbHistory) out.ptbHistory = ptbHistory;
   if (doc.gammaPtb != null && Number.isFinite(doc.gammaPtb)) out.gammaPtb = doc.gammaPtb;
   if (doc.ptbChainlink != null && Number.isFinite(doc.ptbChainlink)) {
     out.ptbChainlink = doc.ptbChainlink;
@@ -212,21 +202,6 @@ function normalizeDoc(doc: MongoRecordedWindowDoc): RecordedWindowSummary | null
   if (doc.ptbTwap30 != null && Number.isFinite(doc.ptbTwap30)) out.ptbTwap30 = doc.ptbTwap30;
   if (doc.ptbTwap60 != null && Number.isFinite(doc.ptbTwap60)) out.ptbTwap60 = doc.ptbTwap60;
   if (windowOutcome === "up" || windowOutcome === "down") out.windowOutcome = windowOutcome;
-  if (typeof doc.slug === "string" && doc.slug.trim()) out.slug = doc.slug.trim();
-  if (typeof doc.question === "string" && doc.question.trim()) out.question = doc.question.trim();
-  if (typeof doc.conditionId === "string" && doc.conditionId.trim()) {
-    out.conditionId = doc.conditionId.trim();
-  }
-  if (doc.yesPrice != null && Number.isFinite(doc.yesPrice)) out.yesPrice = doc.yesPrice;
-  if (doc.noPrice != null && Number.isFinite(doc.noPrice)) out.noPrice = doc.noPrice;
-  if (doc.assetGap != null && Number.isFinite(doc.assetGap)) out.assetGap = doc.assetGap;
-  if (doc.tickCount != null && Number.isFinite(doc.tickCount)) out.tickCount = doc.tickCount;
-  if (doc.clobRawCount != null && Number.isFinite(doc.clobRawCount)) out.clobRawCount = doc.clobRawCount;
-  if (doc.clobBookCount != null && Number.isFinite(doc.clobBookCount)) out.clobBookCount = doc.clobBookCount;
-  if (doc.chainlinkCount != null && Number.isFinite(doc.chainlinkCount)) {
-    out.chainlinkCount = doc.chainlinkCount;
-  }
-  if (doc.knownWallets != null && Number.isFinite(doc.knownWallets)) out.knownWallets = doc.knownWallets;
 
   return out;
 }
@@ -238,45 +213,23 @@ export function summaryToRecordedWindow(summary: RecordedWindowSummary): Recorde
     windowEnd: summary.windowEnd,
     savedAt: summary.savedAt,
     updatedAt: summary.savedAt,
-    slug: summary.slug,
-    question: summary.question,
-    conditionId: summary.conditionId,
     assetPrice: summary.assetPrice,
     prevCloseAsset: summary.prevCloseAsset,
-    ptbHistory: summary.ptbHistory,
     gammaPtb: summary.gammaPtb,
     ptbChainlink: summary.ptbChainlink,
     ptbTwap30: summary.ptbTwap30,
     ptbTwap60: summary.ptbTwap60,
     assetGap: summary.assetGap,
     windowOutcome: summary.windowOutcome,
-    yesPrice: summary.yesPrice,
-    noPrice: summary.noPrice,
-    ptbCrossings: summary.ptbCrossings,
     minAssetPrice: summary.minAssetPrice,
     maxAssetPrice: summary.maxAssetPrice,
-    assetRange: summary.assetRange,
-    rangeTop: summary.rangeTop,
-    rangeBottom: summary.rangeBottom,
-    uniqueTraders: summary.uniqueTraders,
-    newWallets: summary.newWallets,
-    knownWallets: summary.knownWallets,
     tickCount: summary.tickCount ?? 0,
-    clobRawCount: summary.clobRawCount,
-    clobBookCount: summary.clobBookCount,
-    chainlinkCount: summary.chainlinkCount,
   };
 }
 
 function setNum(target: MongoRecordedWindowDoc, key: keyof MongoRecordedWindowDoc, value: unknown): void {
   const n = Number(value);
   if (Number.isFinite(n)) (target as Record<string, unknown>)[key as string] = n;
-}
-
-function setStr(target: MongoRecordedWindowDoc, key: keyof MongoRecordedWindowDoc, value: unknown): void {
-  if (typeof value === "string" && value.trim()) {
-    (target as Record<string, unknown>)[key as string] = value.trim();
-  }
 }
 
 function buildWindowSet(
@@ -289,30 +242,10 @@ function buildWindowSet(
     windowEnd: window.windowEnd,
     savedAt: window.savedAt,
   };
-  if (window.updatedAt) $set.updatedAt = window.updatedAt;
-  setStr($set, "slug", window.slug);
-  setStr($set, "question", window.question);
-  setStr($set, "conditionId", window.conditionId);
-  setNum($set, "ptbCrossings", window.ptbCrossings);
-  setNum($set, "rangeTop", window.rangeTop);
-  setNum($set, "rangeBottom", window.rangeBottom);
-  setNum($set, "uniqueTraders", window.uniqueTraders);
-  setNum($set, "newWallets", window.newWallets);
-  setNum($set, "knownWallets", window.knownWallets);
   setNum($set, "minAssetPrice", window.minAssetPrice);
   setNum($set, "maxAssetPrice", window.maxAssetPrice);
-  setNum($set, "assetRange", window.assetRange);
   setNum($set, "prevCloseAsset", window.prevCloseAsset);
   setNum($set, "assetPrice", window.assetPrice);
-  setNum($set, "yesPrice", window.yesPrice);
-  setNum($set, "noPrice", window.noPrice);
-  setNum($set, "assetGap", window.assetGap);
-  setNum($set, "tickCount", window.tickCount);
-  setNum($set, "clobRawCount", window.clobRawCount);
-  setNum($set, "clobBookCount", window.clobBookCount);
-  setNum($set, "chainlinkCount", window.chainlinkCount);
-  const ptbHistory = encodePtbHistory(window.ptbHistory);
-  if (ptbHistory) $set.ptbHistory = ptbHistory;
   if (window.gammaPtb != null && Number.isFinite(window.gammaPtb)) {
     $set.gammaPtb = window.gammaPtb;
   }
@@ -323,12 +256,118 @@ function buildWindowSet(
     $set.windowOutcome = window.windowOutcome;
   }
 
-  // Prefer flat fields; clear legacy nested outcome so reads cannot diverge.
-  const update: { $set: MongoRecordedWindowDoc; $unset?: Record<string, ""> } = { $set };
-  if (window.windowOutcome === "up" || window.windowOutcome === "down") {
-    update.$unset = { "window.windowOutcome": "" };
+  const $unset: Record<string, ""> = {};
+  for (const field of REMOVED_RECORDED_WINDOW_FIELDS) $unset[field] = "";
+  return { $set, $unset };
+}
+
+const NESTED_KEPT_FIELDS = [
+  "series",
+  "windowStart",
+  "windowEnd",
+  "savedAt",
+  "windowOutcome",
+  "assetPrice",
+  "prevCloseAsset",
+  "ptbChainlink",
+  "ptbTwap30",
+  "ptbTwap60",
+  "gammaPtb",
+  "minAssetPrice",
+  "maxAssetPrice",
+] as const;
+
+function keptValue(value: unknown): unknown | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "number" && !Number.isFinite(value)) return undefined;
+  if (typeof value === "string" && value.trim() === "") return undefined;
+  return value;
+}
+
+/**
+ * Copy kept fields that live only inside `window`, then drop every field Replay
+ * no longer reads. Does not delete documents or clear settled outcomes / PTB / min / max.
+ */
+export async function slimRecordedWindowDocuments(): Promise<{ scanned: number; updated: number }> {
+  const mongo = await getMongoClient();
+  const collection = mongo.db(getMongoDbName()).collection(COLLECTION);
+  const cursor = collection.find({});
+  let scanned = 0;
+  let updated = 0;
+  const ops: Array<{
+    updateOne: {
+      filter: { _id: unknown };
+      update: { $set?: Record<string, unknown>; $unset: Record<string, ""> };
+    };
+  }> = [];
+
+  const flush = async (): Promise<void> => {
+    if (ops.length === 0) return;
+    const result = await collection.bulkWrite(ops as never, { ordered: false });
+    updated += result.modifiedCount ?? 0;
+    ops.length = 0;
+  };
+
+  for await (const doc of cursor) {
+    scanned += 1;
+    const record = doc as Record<string, unknown>;
+    const nested =
+      record.window && typeof record.window === "object" && !Array.isArray(record.window)
+        ? (record.window as Record<string, unknown>)
+        : undefined;
+    const $set: Record<string, unknown> = {};
+    if (nested) {
+      for (const field of NESTED_KEPT_FIELDS) {
+        if (keptValue(record[field]) != null) continue;
+        const lifted = keptValue(nested[field]);
+        if (lifted == null) continue;
+        if (field === "windowOutcome" && lifted !== "up" && lifted !== "down") continue;
+        $set[field] = lifted;
+      }
+    }
+    if (keptValue($set.series ?? record.series) == null) {
+      const fromMarket = keptValue(record.marketSeries);
+      const fromId =
+        typeof record._id === "string" && record._id.includes(":")
+          ? record._id.slice(0, record._id.lastIndexOf(":"))
+          : undefined;
+      const series = fromMarket ?? fromId;
+      if (typeof series === "string" && series.length > 0) $set.series = series;
+    }
+    const outcome = keptValue($set.windowOutcome ?? record.windowOutcome);
+    const $unset: Record<string, ""> = {};
+    for (const field of REMOVED_RECORDED_WINDOW_FIELDS) $unset[field] = "";
+    if (outcome !== "up" && outcome !== "down" && record.windowOutcome != null && $set.windowOutcome == null) {
+      $unset.windowOutcome = "";
+    }
+    const update: { $set?: Record<string, unknown>; $unset: Record<string, ""> } = { $unset };
+    if (Object.keys($set).length > 0) update.$set = $set;
+    ops.push({ updateOne: { filter: { _id: record._id }, update } });
+    if (ops.length >= 500) await flush();
   }
-  return update;
+  await flush();
+  return { scanned, updated };
+}
+
+/** Read token ids already stored on the header. Does not write the document. */
+export async function readRecordedWindowTokenIds(
+  series: string,
+  windowStart: number,
+): Promise<{ yesTokenId?: string; noTokenId?: string }> {
+  const mongo = await getMongoClient();
+  const doc = await mongo
+    .db(getMongoDbName())
+    .collection<{ _id: string; yesTokenId?: string; noTokenId?: string }>(COLLECTION)
+    .findOne(
+      { _id: `${series}:${windowStart}` },
+      { projection: { yesTokenId: 1, noTokenId: 1 } },
+    );
+  const yesTokenId = typeof doc?.yesTokenId === "string" ? doc.yesTokenId.trim() : "";
+  const noTokenId = typeof doc?.noTokenId === "string" ? doc.noTokenId.trim() : "";
+  return {
+    yesTokenId: yesTokenId || undefined,
+    noTokenId: noTokenId || undefined,
+  };
 }
 
 /** Upsert one window header (full local-JSON field set; dest ignores unknown keys). */

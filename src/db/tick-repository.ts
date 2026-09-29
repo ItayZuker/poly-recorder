@@ -8,6 +8,7 @@ import {
   chainlinkTicksPath,
   chainlinkTicksZstPath,
   clobBookTicksPath,
+  clobBookTicksZstPath,
   clobRawTicksPath,
   clobRawTicksZstPath,
   marketTicksDir,
@@ -24,6 +25,7 @@ import {
   toStoredChainlinkTick,
   type StoredTickDocument,
 } from "../tick-compact.js";
+import type { ClobBookLine } from "../clob-book-line.js";
 import { slimClobRawTick, slimChainlinkTick } from "../tick-slim.js";
 import { isUnusablePricePath } from "../window-dynamics.js";
 import fs from "fs/promises";
@@ -90,6 +92,16 @@ export async function insertClobRawTicks(
       ),
     ),
   );
+}
+
+/** Append slim Replay book lines. No `_id`, so a failed flush retries the same batch. */
+export async function appendClobBookLines(
+  market: MarketDocument,
+  windowStart: number,
+  lines: ClobBookLine[],
+): Promise<void> {
+  if (lines.length === 0 || !Number.isFinite(windowStart)) return;
+  await appendJsonlLines(clobBookTicksPath(market._id, windowStart), lines);
 }
 
 export async function insertClobBookTicks(
@@ -353,11 +365,12 @@ export async function classifyWindowChip(
 ): Promise<WindowChipState> {
   const winSec = (market.timeframeMinutes === 15 ? 15 : 5) * 60;
   const windowEnd = windowStart + winSec;
-  const [hasRawZst, hasChainZst] = await Promise.all([
+  const [hasBookZst, hasRawZst, hasChainZst] = await Promise.all([
+    windowHasNonEmptyTickFile(clobBookTicksZstPath(market._id, windowStart)),
     windowHasNonEmptyTickFile(clobRawTicksZstPath(market._id, windowStart)),
     windowHasNonEmptyTickFile(chainlinkTicksZstPath(market._id, windowStart)),
   ]);
-  if (hasRawZst && hasChainZst) {
+  if ((hasBookZst || hasRawZst) && hasChainZst) {
     return (await windowHasUsableZstPricePath(market, windowStart))
       ? "recorded"
       : "missing";

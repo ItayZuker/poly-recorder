@@ -13,8 +13,31 @@ export function getDataDir(): string {
   return dataDir;
 }
 
+/**
+ * A configured DATA_DIR must already exist. Never `mkdir -p` it: if a network
+ * mount (EFS/NFS) is not up yet, that would silently create a local directory
+ * and write ticks the Replay host never sees. The unconfigured default (`data/`)
+ * is still created for local development.
+ */
 export async function initStorage(): Promise<void> {
-  await fs.mkdir(getDataDir(), { recursive: true });
+  const dir = getDataDir();
+  if (!process.env.DATA_DIR?.trim()) {
+    await fs.mkdir(dir, { recursive: true });
+    return;
+  }
+  let stat;
+  try {
+    stat = await fs.stat(dir);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    throw new Error(
+      `DATA_DIR ${dir} is not accessible (${code ?? String(err)}). ` +
+        "Is the volume mounted? Refusing to create it.",
+    );
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`DATA_DIR ${dir} exists but is not a directory`);
+  }
 }
 
 /** Legacy path — read once to migrate into Mongo `markets`. */
@@ -44,6 +67,10 @@ export function clobRawTicksZstPath(series: string, windowStart: number): string
 
 export function clobBookTicksPath(series: string, windowStart: number): string {
   return path.join(windowTicksDir(series, windowStart), "clob-book.jsonl");
+}
+
+export function clobBookTicksZstPath(series: string, windowStart: number): string {
+  return path.join(windowTicksDir(series, windowStart), "clob-book.jsonl.zst");
 }
 
 export function chainlinkTicksPath(series: string, windowStart: number): string {

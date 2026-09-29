@@ -4,6 +4,8 @@ import { slimJsonlDocument, tickKindFromPath } from "../tick-slim.js";
 import {
   chainlinkTicksPath,
   chainlinkTicksZstPath,
+  clobBookTicksPath,
+  clobBookTicksZstPath,
   clobRawTicksPath,
   clobRawTicksZstPath,
 } from "./data-dir.js";
@@ -40,7 +42,16 @@ async function jsonlToZst(jsonlPath: string, zstPath: string): Promise<void> {
     throw new Error(`Empty JSONL after slim: ${jsonlPath}`);
   }
   const packed = await compress(body, ZSTD_LEVEL);
-  await fs.writeFile(zstPath, packed);
+  // Atomic publish: a reader on another host (NFS/EFS) must never see a partial .zst.
+  // Write to a temp name in the same directory, then rename over the final path.
+  const tmpPath = `${zstPath}.tmp-${process.pid}`;
+  try {
+    await fs.writeFile(tmpPath, packed);
+    await fs.rename(tmpPath, zstPath);
+  } catch (err) {
+    await removeFile(tmpPath);
+    throw err;
+  }
 }
 
 /** Replay: decompress a `.jsonl.zst` to UTF-8 JSONL text. */
@@ -65,22 +76,28 @@ export async function readJsonlZstLines<T>(zstPath: string): Promise<T[]> {
   }
 }
 
-/** After Gamma: write separate zst files and delete live JSONL. */
+/** After Gamma: publish the book (or legacy raw) plus Chainlink, then delete live JSONL. */
 export async function publishWindowTicksToZst(
   series: string,
   windowStart: number,
 ): Promise<"published" | "skipped"> {
+  const bookJsonl = clobBookTicksPath(series, windowStart);
   const rawJsonl = clobRawTicksPath(series, windowStart);
   const chainJsonl = chainlinkTicksPath(series, windowStart);
-  const [hasRaw, hasChain] = await Promise.all([
+  const [hasBook, hasRaw, hasChain] = await Promise.all([
+    fileNonEmpty(bookJsonl),
     fileNonEmpty(rawJsonl),
     fileNonEmpty(chainJsonl),
   ]);
-  if (!hasRaw || !hasChain) {
+  if (!hasChain || (!hasBook && !hasRaw)) {
     await deleteWindowJsonlTicks(series, windowStart);
     return "skipped";
   }
-  await jsonlToZst(rawJsonl, clobRawTicksZstPath(series, windowStart));
+  if (hasBook) {
+    await jsonlToZst(bookJsonl, clobBookTicksZstPath(series, windowStart));
+  } else {
+    await jsonlToZst(rawJsonl, clobRawTicksZstPath(series, windowStart));
+  }
   await jsonlToZst(chainJsonl, chainlinkTicksZstPath(series, windowStart));
   await deleteWindowJsonlTicks(series, windowStart);
   return "published";
@@ -90,22 +107,24 @@ export async function windowHasLiveJsonlTicks(
   series: string,
   windowStart: number,
 ): Promise<boolean> {
-  const [hasRaw, hasChain] = await Promise.all([
+  const [hasBook, hasRaw, hasChain] = await Promise.all([
+    fileNonEmpty(clobBookTicksPath(series, windowStart)),
     fileNonEmpty(clobRawTicksPath(series, windowStart)),
     fileNonEmpty(chainlinkTicksPath(series, windowStart)),
   ]);
-  return hasRaw || hasChain;
+  return hasBook || hasRaw || hasChain;
 }
 
 export async function windowHasReplayZst(
   series: string,
   windowStart: number,
 ): Promise<boolean> {
-  const [hasRaw, hasChain] = await Promise.all([
+  const [hasBook, hasRaw, hasChain] = await Promise.all([
+    fileNonEmpty(clobBookTicksZstPath(series, windowStart)),
     fileNonEmpty(clobRawTicksZstPath(series, windowStart)),
     fileNonEmpty(chainlinkTicksZstPath(series, windowStart)),
   ]);
-  return hasRaw && hasChain;
+  return (hasBook || hasRaw) && hasChain;
 }
 
 /** After 20m with no Gamma: drop live JSONL so Dest cannot replay it. */
@@ -114,6 +133,7 @@ export async function deleteWindowJsonlTicks(
   windowStart: number,
 ): Promise<void> {
   await Promise.all([
+    removeFile(clobBookTicksPath(series, windowStart)),
     removeFile(clobRawTicksPath(series, windowStart)),
     removeFile(chainlinkTicksPath(series, windowStart)),
   ]);

@@ -25,10 +25,7 @@ export async function saveRecordedWindow(
   market: MarketDocument,
   doc: Omit<RecordedWindowDocument, "_id" | "updatedAt">,
 ): Promise<void> {
-  await upsertRecordedWindowSummary(market._id, {
-    ...doc,
-    updatedAt: new Date().toISOString(),
-  });
+  await upsertRecordedWindowSummary(market._id, doc);
 }
 
 export async function getRecordedWindow(

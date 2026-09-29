@@ -1,10 +1,10 @@
 {
-  "name": "poly-replay-recorder",
+  "name": "poly-recorder",
   "version": "1.0.0",
   "description": "Standalone Polymarket up/down recorder with a week coverage board",
   "type": "module",
   "engines": {
-    "node": ">=20.10"
+    "node": ">=22"
   },
   "scripts": {
     "start": "tsx src/server.ts",
