@@ -9,6 +9,8 @@ const grid = document.getElementById("week-grid");
 let markets = [];
 let selectedSeries = "btc-5m";
 let switchBusy = false;
+/** "recorder" | "viewer" — from /api/markets. Viewer cannot toggle Recording. */
+let recorderRole = "recorder";
 let expectedPerHour = 12;
 let liveBothSockets = false;
 
@@ -140,10 +142,23 @@ function fillMarkets(list) {
   setSwitch(Boolean(selected?.recordingEnabled));
 }
 
+function applyRole(role) {
+  recorderRole = role === "viewer" ? "viewer" : "recorder";
+  const viewer = recorderRole === "viewer";
+  document.body.classList.toggle("is-viewer", viewer);
+  switchBtn.disabled = viewer || switchBusy;
+  switchBtn.title = viewer
+    ? "Viewer mode — Recording is controlled on the live recorder"
+    : "Same Mongo Recording flag as Admin CRM";
+  const caption = document.querySelector(".recording-switch-caption");
+  if (caption) caption.textContent = viewer ? "Recording (viewer)" : "Recording";
+}
+
 async function loadMarkets() {
   const res = await fetch("/api/markets");
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Failed to load markets");
+  applyRole(data.role);
   fillMarkets(data.markets);
 }
 
@@ -155,7 +170,7 @@ async function loadCoverage() {
 }
 
 async function toggleRecording() {
-  if (switchBusy) return;
+  if (switchBusy || recorderRole === "viewer") return;
   const next = !switchBtn.classList.contains("is-on");
   switchBusy = true;
   switchBtn.disabled = true;
@@ -174,7 +189,7 @@ async function toggleRecording() {
     console.error(err);
   } finally {
     switchBusy = false;
-    switchBtn.disabled = false;
+    switchBtn.disabled = recorderRole === "viewer";
   }
 }
 

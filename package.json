@@ -8,7 +8,6 @@
   },
   "scripts": {
     "start": "tsx src/server.ts",
-    "dest": "tsx src/server.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit"
   },

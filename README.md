@@ -4,6 +4,8 @@ Standalone recorder for Polymarket 5 Min / 15 Min up/down markets. It writes tic
 
 Do **not** record the same series on dest and this app at the same time (they would write the same files).
 
+Only one instance may be the live recorder. Every other checkout (e.g. a developer PC) must run with `RECORDER_ROLE=viewer`: it serves the coverage board from its local `DATA_DIR` but never records, never prunes, never writes `recorded_windows`, and its Recording switch is disabled. Two recorders on the same Mongo overwrite and delete each other's window headers.
+
 ## Setup
 
 1. Copy `.env.example` to `.env`
@@ -28,3 +30,4 @@ For the Linux / systemd deployment see [docs/deploy-linux.md](docs/deploy-linux.
 | `MONGODB_DB` | Default `poly_recorder` |
 | `DATA_DIR` | Tick / window files (must exist; e.g. `/mnt/poly-data`) |
 | `PORT` | Default `3849` |
+| `RECORDER_ROLE` | **Required.** `recorder` (the one live instance) or `viewer`. Unset or anything else refuses to start. |

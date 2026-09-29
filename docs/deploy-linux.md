@@ -54,14 +54,18 @@ cd /home/ubuntu/poly-recorder && npm ci && npm run build && ls dist/server.js
 Only the variables the code reads. `MONGODB_DB` defaults to `poly_recorder`, `CLOB_HOST`
 to `https://clob.polymarket.com`, `CHAIN_ID` to `137`; leave them out unless you need to
 override. Replace the `MONGODB_URI` placeholder with the Atlas connection string
-(same cluster as dest / CRM). systemd's `EnvironmentFile` does not expand `${VAR}` or
-strip quotes the way a shell does, so keep values unquoted.
+(same cluster as dest / CRM). `RECORDER_ROLE` is required: `recorder` marks this as the one
+live recorder; every other checkout of the repo (your PC) must use `viewer`. The process
+refuses to start if it is missing or misspelled. systemd's
+`EnvironmentFile` does not expand `${VAR}` or strip quotes the way a shell does, so keep
+values unquoted.
 
 ```bash
 cat > /home/ubuntu/poly-recorder/.env <<'EOF'
 DATA_DIR=/mnt/poly-data
 MONGODB_URI=mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/?retryWrites=true&w=majority
 PORT=3849
+RECORDER_ROLE=recorder
 EOF
 chmod 600 /home/ubuntu/poly-recorder/.env
 ```
@@ -107,6 +111,7 @@ A healthy first minute looks like this (order may vary slightly):
 ```text
 [server] Poly Recorder listening on http://localhost:3849
 [server] DATA_DIR=/mnt/poly-data
+[server] RECORDER_ROLE=recorder
 [retention] Scheduler started (delete tick/window data older than 7 days)
 [recorder] Recording started for btc-5m            <- printed twice per market with Recording = On in Mongo
 [clob] WebSocket connected
@@ -138,8 +143,8 @@ Most likely failures:
 
    Fix: Atlas → Network Access → Add IP Address → the instance's public (static) IP, or the
    VPC-peered CIDR. No restart needed; the next 30 s sync succeeds. If the message is instead
-   `Fatal: MONGODB_URI is not set` (exit code 1, restarts every 5 s), the `.env` line is
-   missing or misspelled.
+   `Fatal: MONGODB_URI is not set` or `Fatal: RECORDER_ROLE is not set` (exit code 1,
+   restarts every 5 s), that `.env` line is missing or misspelled.
 
 2. **DATA_DIR not mounted.** The service exits immediately with:
 

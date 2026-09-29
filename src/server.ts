@@ -15,6 +15,12 @@ import { startArchiveScheduler, stopArchiveScheduler } from "./archive-service.j
 import { logService } from "./log-service.js";
 import { getWeekCoverage } from "./week-coverage.js";
 import { backfillLocalWindowsToMongo } from "./db/backfill-windows-to-mongo.js";
+import {
+  getRecorderRole,
+  isRecorderRoleValid,
+  isViewerRole,
+  RECORDER_ROLES,
+} from "./recording-enabled.js";
 
 const PORT = Number(process.env.PORT) || 3849;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,15 +41,30 @@ function assertRequiredEnv(): void {
     );
     process.exit(1);
   }
+  // Required: an unset or misspelled role must never become a second live recorder.
+  if (!isRecorderRoleValid()) {
+    const raw = process.env.RECORDER_ROLE;
+    console.error(
+      raw == null || raw.trim() === ""
+        ? `Fatal: RECORDER_ROLE is not set. Add RECORDER_ROLE=recorder (the one live recorder) ` +
+            `or RECORDER_ROLE=viewer (read-only) to .env and restart.`
+        : `Fatal: RECORDER_ROLE=${JSON.stringify(raw)} is not valid. Use one of: ${RECORDER_ROLES.join(", ")}.`,
+    );
+    process.exit(1);
+  }
 }
 
 async function main(): Promise<void> {
   assertRequiredEnv();
+  const role = getRecorderRole();
+  const viewer = isViewerRole();
   await initStorage();
   await Promise.all(SEED_MARKETS.map((m) => ensureMarketDirs(m.series)));
-  const backfilled = await backfillLocalWindowsToMongo();
-  if (backfilled > 0) {
-    logService.info("recorder", `Backfilled ${backfilled} window header(s) from local JSON to Mongo`);
+  if (!viewer) {
+    const backfilled = await backfillLocalWindowsToMongo();
+    if (backfilled > 0) {
+      logService.info("recorder", `Backfilled ${backfilled} window header(s) from local JSON to Mongo`);
+    }
   }
 
   const app = express();
@@ -61,7 +82,7 @@ async function main(): Promise<void> {
   app.get("/api/health", (_req, res) => {
     res.json({
       ok: true,
-      role: "recorder",
+      role,
       dataDir: getDataDir(),
     });
   });
@@ -70,6 +91,7 @@ async function main(): Promise<void> {
     try {
       const markets = await listMarkets();
       res.json({
+        role,
         markets: markets.map((m) => ({
           _id: m._id,
           label: m.label,
@@ -84,6 +106,12 @@ async function main(): Promise<void> {
   });
 
   app.patch("/api/markets/:series/recording", async (req, res) => {
+    if (viewer) {
+      res.status(403).json({
+        error: "This instance is a viewer (RECORDER_ROLE=viewer); change Recording on the live recorder.",
+      });
+      return;
+    }
     try {
       const series = parseSeries(req.params.series);
       const enabled = req.body?.recordingEnabled === true;
@@ -124,6 +152,14 @@ async function main(): Promise<void> {
   app.listen(PORT, () => {
     logService.info("server", `Poly Recorder listening on http://localhost:${PORT}`);
     logService.info("server", `DATA_DIR=${getDataDir()}`);
+    logService.info("server", `RECORDER_ROLE=${role}`);
+    if (viewer) {
+      logService.warn(
+        "server",
+        "Viewer mode: recording, retention and Mongo header writes are disabled on this instance",
+      );
+      return;
+    }
     void recordingManager.sync().catch((err) => {
       logService.warn("recorder", `Initial sync failed: ${String(err)}`);
     });
