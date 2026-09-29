@@ -1,0 +1,51 @@
+name: Deploy to Lightsail
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-poly-recorder
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+
+      - name: Pull, build, restart
+        run: |
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes ubuntu@${{ secrets.DEPLOY_HOST }} bash -s <<'EOF'
+            set -euo pipefail
+            cd /home/ubuntu/poly-recorder
+            git fetch origin main
+            git reset --hard origin/main
+            npm ci
+            npm run build
+            sudo systemctl restart poly-recorder
+            sleep 5
+            systemctl is-active --quiet poly-recorder
+            curl -fsS http://localhost:3849/api/health
+            echo
+            journalctl -u poly-recorder -n 15 --no-pager
+          EOF

@@ -178,9 +178,11 @@ collection in Atlas → Browse Collections instead.)
 
 ## 8. Update procedure
 
-Stopping first lets the recorder finalize a window that has already ended and flush the
-last buffered ticks (it exits within `TimeoutStopSec=30`). A window in progress resumes
-from its Mongo header on restart with only the downtime gap missing.
+Pushes to `main` deploy themselves: `.github/workflows/deploy.yml` typechecks, then SSHes
+in, pulls, builds, and restarts. Watch the run under the repository **Actions** tab. The
+restart is the only downtime (a few seconds); a window in progress resumes from its Mongo
+header. The block below is the manual fallback. It stops first so an already-ended window
+is finalized and the last ticks are flushed (within `TimeoutStopSec=30`).
 
 ```bash
 cd ~/poly-recorder && sudo systemctl stop poly-recorder && git pull && npm ci && npm run build && sudo systemctl start poly-recorder && journalctl -u poly-recorder -n 30 --no-pager
