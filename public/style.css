@@ -185,16 +185,40 @@ body.is-viewer .recording-switch:disabled {
   flex: 1 1 0;
   min-height: 0;
   width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  container-type: inline-size;
 }
 
 .week-grid {
   height: 100%;
   width: 100%;
+  min-width: calc(52px + 7 * 180px);
   display: grid;
-  grid-template-columns: 52px repeat(7, minmax(0, 1fr));
+  grid-template-columns: 52px repeat(7, minmax(180px, 1fr));
   grid-template-rows: 28px repeat(24, minmax(0, 1fr));
   border: 1px solid var(--border);
   background: var(--panel);
+}
+
+/* Seven day columns fit the view. Each is at least 180px; extra days scroll. */
+.week-grid.is-history {
+  width: max-content;
+  min-width: 100%;
+  grid-template-columns: 52px repeat(var(--day-count), max(180px, calc((100cqw - 52px) / 7)));
+}
+
+.week-grid.is-history .week-corner,
+.week-grid.is-history .week-hour {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--panel);
+}
+
+.week-grid.is-history .week-hour.is-now {
+  z-index: 4;
+  background: color-mix(in srgb, var(--accent) 38%, var(--panel));
 }
 
 .week-corner,
@@ -211,8 +235,26 @@ body.is-viewer .recording-switch:disabled {
 }
 
 .week-day {
+  justify-content: space-between;
+  padding: 0 6px;
+  gap: 4px;
   font-weight: 600;
   color: var(--text);
+}
+
+.week-day-name,
+.week-day-date {
+  white-space: nowrap;
+}
+
+.week-day-date {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.week-day.is-now .week-day-date {
+  color: inherit;
 }
 
 .week-hour {
