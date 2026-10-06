@@ -58,7 +58,8 @@ override. Replace the `MONGODB_URI` placeholder with the Atlas connection string
 live recorder; every other checkout of the repo (your PC) must use `viewer`. The process
 refuses to start if it is missing or misspelled. systemd's
 `EnvironmentFile` does not expand `${VAR}` or strip quotes the way a shell does, so keep
-values unquoted.
+values unquoted. `SITE_PASSWORD` is optional; when set, the public site shows the same
+password page as the client app. Use the same password string, with no quotes.
 
 ```bash
 cat > /home/ubuntu/poly-recorder/.env <<'EOF'
@@ -66,6 +67,7 @@ DATA_DIR=/mnt/poly-data
 MONGODB_URI=mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/?retryWrites=true&w=majority
 PORT=3849
 RECORDER_ROLE=recorder
+SITE_PASSWORD=
 EOF
 chmod 600 /home/ubuntu/poly-recorder/.env
 ```

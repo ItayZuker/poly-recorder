@@ -31,3 +31,4 @@ For the Linux / systemd deployment see [docs/deploy-linux.md](docs/deploy-linux.
 | `DATA_DIR` | Tick / window files (must exist; e.g. `/mnt/poly-data`) |
 | `PORT` | Default `3849` |
 | `RECORDER_ROLE` | **Required.** `recorder` (the one live instance) or `viewer`. Unset or anything else refuses to start. |
+| `SITE_PASSWORD` | Optional. When set, the browser UI requires this password. Recording continues either way. |

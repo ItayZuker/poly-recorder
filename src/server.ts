@@ -20,6 +20,7 @@ import {
   isViewerRole,
   RECORDER_ROLES,
 } from "./recording-enabled.js";
+import { isSiteLockEnabled, siteLockMiddleware } from "./site-lock.js";
 
 const PORT = Number(process.env.PORT) || 3849;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -67,7 +68,10 @@ async function main(): Promise<void> {
   }
 
   const app = express();
+  app.set("trust proxy", 1);
   app.use(express.json({ limit: "32kb" }));
+  app.use(express.urlencoded({ extended: false }));
+  app.use(siteLockMiddleware);
   app.use(
     express.static(path.join(__dirname, "..", "public"), {
       etag: false,
@@ -133,6 +137,9 @@ async function main(): Promise<void> {
     logService.info("server", `Poly Recorder listening on http://localhost:${PORT}`);
     logService.info("server", `DATA_DIR=${getDataDir()}`);
     logService.info("server", `RECORDER_ROLE=${role}`);
+    if (isSiteLockEnabled()) {
+      logService.info("server", "SITE_PASSWORD set — browser UI is locked");
+    }
     if (viewer) {
       logService.warn(
         "server",
