@@ -2,16 +2,11 @@ const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_LABEL = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
 
 const marketSelect = document.getElementById("market-select");
-const switchBtn = document.getElementById("recording-switch");
-const switchLabel = switchBtn.querySelector(".recording-switch-label");
 const grid = document.getElementById("week-grid");
 const weekWrap = grid.parentElement;
 
 let markets = [];
 let selectedSeries = "btc-5m";
-let switchBusy = false;
-/** "recorder" | "viewer" — from /api/markets. Viewer cannot toggle Recording. */
-let recorderRole = "recorder";
 let expectedPerHour = 12;
 let liveBothSockets = false;
 /** "week" or "history:<expected>:<day keys>" — rebuild the grid only when this changes. */
@@ -92,10 +87,7 @@ function buildGrid() {
   }
 }
 
-function setSwitch(on) {
-  switchBtn.classList.toggle("is-on", on);
-  switchBtn.setAttribute("aria-pressed", on ? "true" : "false");
-  switchLabel.textContent = on ? "On" : "Off";
+function setRecording(on) {
   grid.classList.toggle("is-recording", on);
   paintNow();
 }
@@ -227,7 +219,7 @@ function paintCoverage(payload) {
   }
   liveBothSockets = payload.liveBothSockets === true;
   if (typeof payload.recordingEnabled === "boolean") {
-    setSwitch(payload.recordingEnabled);
+    setRecording(payload.recordingEnabled);
   }
   paintNow();
 }
@@ -246,26 +238,13 @@ function fillMarkets(list) {
   }
   marketSelect.value = selectedSeries;
   const selected = markets.find((m) => m._id === selectedSeries);
-  setSwitch(Boolean(selected?.recordingEnabled));
-}
-
-function applyRole(role) {
-  recorderRole = role === "viewer" ? "viewer" : "recorder";
-  const viewer = recorderRole === "viewer";
-  document.body.classList.toggle("is-viewer", viewer);
-  switchBtn.disabled = viewer || switchBusy;
-  switchBtn.title = viewer
-    ? "Viewer mode — Recording is controlled on the live recorder"
-    : "Same Mongo Recording flag as Admin CRM";
-  const caption = document.querySelector(".recording-switch-caption");
-  if (caption) caption.textContent = viewer ? "Recording (viewer)" : "Recording";
+  setRecording(Boolean(selected?.recordingEnabled));
 }
 
 async function loadMarkets() {
   const res = await fetch("/api/markets");
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Failed to load markets");
-  applyRole(data.role);
   fillMarkets(data.markets);
 }
 
@@ -276,36 +255,9 @@ async function loadCoverage() {
   paintCoverage(data);
 }
 
-async function toggleRecording() {
-  if (switchBusy || recorderRole === "viewer") return;
-  const next = !switchBtn.classList.contains("is-on");
-  switchBusy = true;
-  switchBtn.disabled = true;
-  try {
-    const res = await fetch(`/api/markets/${encodeURIComponent(selectedSeries)}/recording`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recordingEnabled: next }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to update recording");
-    setSwitch(data.recordingEnabled === true);
-    const market = markets.find((m) => m._id === selectedSeries);
-    if (market) market.recordingEnabled = data.recordingEnabled === true;
-  } catch (err) {
-    console.error(err);
-  } finally {
-    switchBusy = false;
-    switchBtn.disabled = recorderRole === "viewer";
-  }
-}
-
 marketSelect.addEventListener("change", () => {
   selectedSeries = marketSelect.value;
   void loadCoverage();
-});
-switchBtn.addEventListener("click", () => {
-  void toggleRecording();
 });
 
 buildGrid();

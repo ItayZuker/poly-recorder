@@ -19,7 +19,7 @@ For the Linux / systemd deployment see [docs/deploy-linux.md](docs/deploy-linux.
 
 - **Poly Recorder** header (same height as dest)
 - Market dropdown
-- **On / Off** — writes Mongo `recordingEnabled` (CRM sees the same flag; this app polls Mongo every 30s)
+- Recording on/off is set in the CRM app. This app only reads Mongo `recordingEnabled` (polls every 30s) and does not change it.
 - Full-width UTC week grid: red = missing windows, green bar = recorded count (12 per hour on 5 Min, 4 on 15 Min)
 
 ## Env

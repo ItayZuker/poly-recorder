@@ -7,7 +7,6 @@ import { getDataDir, initStorage, ensureMarketDirs } from "./db/data-dir.js";
 import {
   listMarkets,
   getMarket,
-  updateMarket,
 } from "./db/market-repository.js";
 import { SEED_MARKETS } from "./collections.js";
 import { recordingManager } from "./recording-manager.js";
@@ -105,29 +104,10 @@ async function main(): Promise<void> {
     }
   });
 
-  app.patch("/api/markets/:series/recording", async (req, res) => {
-    if (viewer) {
-      res.status(403).json({
-        error: "This instance is a viewer (RECORDER_ROLE=viewer); change Recording on the live recorder.",
-      });
-      return;
-    }
-    try {
-      const series = parseSeries(req.params.series);
-      const enabled = req.body?.recordingEnabled === true;
-      const updated = await updateMarket(series, { recordingEnabled: enabled });
-      if (!updated) {
-        res.status(404).json({ error: "Market not found" });
-        return;
-      }
-      await recordingManager.sync();
-      res.json({
-        _id: updated._id,
-        recordingEnabled: updated.recordingEnabled === true,
-      });
-    } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-    }
+  app.patch("/api/markets/:series/recording", (_req, res) => {
+    res.status(403).json({
+      error: "Recording is controlled from the CRM app.",
+    });
   });
 
   app.get("/api/week-coverage", async (req, res) => {
