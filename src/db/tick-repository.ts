@@ -243,12 +243,15 @@ export async function stampOfficialChainlinkCloseTip(
     return "unchanged";
   }
 
+  const lastMid = mid[mid.length - 1]!;
   const tip: ChainlinkTickDocument = {
     _id: `${windowStart}:gamma-close`,
     windowStart,
     windowEnd,
     tMs: endMs,
     assetPrice: close,
+    twap30: lastMid.twap30,
+    twap60: lastMid.twap60,
   };
 
   await writeJsonlFile(filePath, [

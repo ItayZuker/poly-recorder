@@ -560,6 +560,11 @@ export class MarketRecorder {
     if (this.assetPrices.assetPrice != null) {
       tick.assetPrice = roundTo4(this.assetPrices.assetPrice);
     }
+    const { asset } = parseMarketSeries(this.market._id);
+    const twap30 = this.chainlinkAverage(asset, 30, tMs);
+    const twap60 = this.chainlinkAverage(asset, 60, tMs);
+    if (twap30 != null) tick.twap30 = twap30;
+    if (twap60 != null) tick.twap60 = twap60;
     if (this.assetPrices.prevCloseAsset != null) {
       tick.prevCloseAsset = roundTo4(this.assetPrices.prevCloseAsset);
       tick.priceToBeatSource = this.gammaSettled ? "gamma" : "chainlink";
@@ -594,6 +599,16 @@ export class MarketRecorder {
     this.lastChainlinkTickAtMs = Date.now();
     this.pushChainlinkTick(tMs);
     this.latchOpenPtbs();
+  }
+
+  /** Official average when it is fresh; otherwise the average computed from raw ticks. */
+  private chainlinkAverage(asset: string, windowSec: 30 | 60, tMs: number): number | undefined {
+    const official = chainlinkPriceFeed.getLiveTwap(asset, windowSec, {
+      maxAgeMs: OPEN_TWAP_MAX_AGE_MS,
+    })?.value;
+    return roundPolymarketAssetPriceMaybe(
+      official ?? chainlinkPriceFeed.getComputedTwap(asset, windowSec, tMs),
+    );
   }
 
   /** Update live asset price. Start PTBs latch only via latchOpenPtbs (not Gamma close). */

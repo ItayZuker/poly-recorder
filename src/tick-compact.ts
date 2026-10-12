@@ -66,6 +66,10 @@ function roundOptional(value: number | undefined): number | undefined {
   return roundTo4(value);
 }
 
+function finiteStoredNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 export function makeStoredTickId(windowStart: number, seq: number): string {
   return `${windowStart}:${seq}`;
 }
@@ -191,6 +195,8 @@ export function fromStoredChainlinkTick(doc: StoredTickDocument): ChainlinkTickD
       windowEnd: Number(doc.windowEnd ?? 0),
       tMs: Number(doc.tMs),
       assetPrice: doc.assetPrice as number | undefined,
+      twap30: finiteStoredNumber(doc.twap30),
+      twap60: finiteStoredNumber(doc.twap60),
       prevCloseAsset: doc.prevCloseAsset as number | undefined,
       priceToBeatSource:
         doc.priceToBeatSource === "gamma" ||

@@ -98,6 +98,10 @@ export interface ChainlinkTickDocument {
   windowEnd: number;
   tMs: number;
   assetPrice?: number;
+  /** Official 30s average at this tick, or a computed average when the official feed is quiet. */
+  twap30?: number;
+  /** Official 60s average at this tick, or a computed average when the official feed is quiet. */
+  twap60?: number;
   prevCloseAsset?: number;
   /** chainlink = first RTDS tick; rest = crypto-price open; gamma = official tip. */
   priceToBeatSource?: "chainlink" | "rest" | "gamma";

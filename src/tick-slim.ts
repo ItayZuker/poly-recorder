@@ -55,7 +55,9 @@ function usesNamedChainlinkKeys(doc: Record<string, unknown>): boolean {
     doc.assetGap !== undefined ||
     doc.assetRange !== undefined ||
     doc.rangeTop !== undefined ||
-    doc.rangeBottom !== undefined
+    doc.rangeBottom !== undefined ||
+    doc.twap30 !== undefined ||
+    doc.twap60 !== undefined
   );
 }
 
@@ -87,14 +89,18 @@ export function stripChainlinkRangeFields(doc: Record<string, unknown>): boolean
   return droppedMin || droppedMax;
 }
 
-/** Chainlink line stored on disk: time and asset price. Window fields stay on the Mongo header. */
+/** Chainlink line stored on disk: time, raw price, and the 30s/60s averages. */
 export function slimChainlinkTick(doc: Record<string, unknown>): Record<string, unknown> {
   const compact = isCompactChainlink(doc);
   const tMs = finiteNumber(compact ? doc["2"] : doc.tMs);
   const assetPrice = finiteNumber(compact ? doc["3"] : doc.assetPrice);
+  const twap30 = finiteNumber(doc.twap30);
+  const twap60 = finiteNumber(doc.twap60);
   const out: Record<string, unknown> = {};
   if (tMs !== undefined) out.tMs = tMs;
   if (assetPrice !== undefined) out.assetPrice = assetPrice;
+  if (twap30 !== undefined) out.twap30 = twap30;
+  if (twap60 !== undefined) out.twap60 = twap60;
   return out;
 }
 
