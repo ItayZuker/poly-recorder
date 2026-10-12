@@ -1,8 +1,10 @@
 /** Published Replay tick lines: only the fields the trading app still reads. */
 
-const BOOK_LEVELS = 3;
+import { RECORDING_BOOK_DEPTH } from "./book-depth.js";
 
-export type TickFileKind = "chainlink" | "clob-raw";
+const BOOK_LEVELS = RECORDING_BOOK_DEPTH;
+
+export type TickFileKind = "chainlink" | "clob-raw" | "clob-book";
 
 export class TickSlimParseError extends Error {
   constructor(message: string) {
@@ -253,6 +255,82 @@ function slimClobMessage(message: unknown): Record<string, unknown> | null {
   return slimUnknownMessage(msg);
 }
 
+function oneBookLevel(
+  price: unknown,
+  size: unknown,
+): Array<{ price: number; size: number }> {
+  const priceN = finiteNumber(price);
+  const sizeN = finiteNumber(size);
+  if (priceN == null || sizeN == null || sizeN <= 0) return [];
+  return [{ price: priceN, size: sizeN }];
+}
+
+function bookSide(
+  raw: unknown,
+  side: "bid" | "ask",
+): Array<{ price: number; size: number }> {
+  const levels = slimLevels(raw, side);
+  if (!levels) return [];
+  const out: Array<{ price: number; size: number }> = [];
+  for (const level of levels) {
+    const price = finiteNumber(level.price);
+    const size = finiteNumber(level.size);
+    if (price == null || size == null || size <= 0) continue;
+    out.push({ price, size });
+  }
+  return out;
+}
+
+/**
+ * Published book line: `{ tMs, yesBids, yesAsks, noBids, noAsks }` with the
+ * recording depth. Window bounds stay on the Mongo header.
+ * Returns null when the line has no time or no levels.
+ */
+export function slimClobBookTick(doc: Record<string, unknown>): Record<string, unknown> | null {
+  const hasNamedArrays =
+    Array.isArray(doc.yesBids) ||
+    Array.isArray(doc.yesAsks) ||
+    Array.isArray(doc.noBids) ||
+    Array.isArray(doc.noAsks);
+  const hasNamedTop =
+    doc.tMs !== undefined ||
+    doc.yesBid !== undefined ||
+    doc.yesAsk !== undefined ||
+    doc.noBid !== undefined ||
+    doc.noAsk !== undefined;
+
+  let tMs: number | undefined;
+  let yesBids: Array<{ price: number; size: number }>;
+  let yesAsks: Array<{ price: number; size: number }>;
+  let noBids: Array<{ price: number; size: number }>;
+  let noAsks: Array<{ price: number; size: number }>;
+
+  if (hasNamedArrays || hasNamedTop) {
+    tMs = finiteNumber(doc.tMs);
+    if (hasNamedArrays) {
+      yesBids = bookSide(doc.yesBids, "bid");
+      yesAsks = bookSide(doc.yesAsks, "ask");
+      noBids = bookSide(doc.noBids, "bid");
+      noAsks = bookSide(doc.noAsks, "ask");
+    } else {
+      yesBids = oneBookLevel(doc.yesBid, doc.yesBidSize);
+      yesAsks = oneBookLevel(doc.yesAsk, doc.yesAskSize);
+      noBids = oneBookLevel(doc.noBid, doc.noBidSize);
+      noAsks = oneBookLevel(doc.noAsk, doc.noAskSize);
+    }
+  } else {
+    tMs = finiteNumber(doc["2"]);
+    yesBids = oneBookLevel(doc["4"], doc["6"]);
+    yesAsks = oneBookLevel(doc["5"], doc["7"]);
+    noBids = oneBookLevel(doc["9"], doc["11"]);
+    noAsks = oneBookLevel(doc["10"], doc["12"]);
+  }
+
+  if (tMs === undefined) return null;
+  if (yesBids.length + yesAsks.length + noBids.length + noAsks.length === 0) return null;
+  return { tMs, yesBids, yesAsks, noBids, noAsks };
+}
+
 /** `{ tMs, payload }` or null when the message cannot change the book. */
 export function slimClobRawTick(doc: Record<string, unknown>): Record<string, unknown> | null {
   const payload = slimClobPayload(doc.payload);
@@ -286,10 +364,13 @@ export function slimJsonlDocument(
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new TickSlimParseError(`line ${i + 1}: expected a JSON object`);
     }
+    const record = parsed as Record<string, unknown>;
     const slim =
       kind === "chainlink"
-        ? slimChainlinkTick(parsed as Record<string, unknown>)
-        : slimClobRawTick(parsed as Record<string, unknown>);
+        ? slimChainlinkTick(record)
+        : kind === "clob-book"
+          ? slimClobBookTick(record)
+          : slimClobRawTick(record);
     if (slim == null) continue;
     out.push(JSON.stringify(slim));
   }
@@ -303,6 +384,7 @@ export function slimJsonlDocument(
 export function tickKindFromPath(filePath: string): TickFileKind | null {
   const base = filePath.replace(/\\/g, "/");
   if (base.endsWith("/chainlink.jsonl") || base.endsWith("/chainlink.jsonl.zst")) return "chainlink";
+  if (base.endsWith("/clob-book.jsonl") || base.endsWith("/clob-book.jsonl.zst")) return "clob-book";
   if (base.endsWith("/clob-raw.jsonl") || base.endsWith("/clob-raw.jsonl.zst")) return "clob-raw";
   return null;
 }

@@ -6,7 +6,8 @@ import { readJsonlZstText } from "./tick-zst.js";
 import { TickSlimParseError, slimJsonlDocument, tickKindFromPath, type TickFileKind } from "../tick-slim.js";
 
 const ZSTD_LEVEL = 3;
-const TICK_FILES = ["clob-raw.jsonl.zst", "chainlink.jsonl.zst"] as const;
+/** Published files. Chainlink becomes `{ tMs, assetPrice }`. Book becomes the 3-level snapshot. */
+const TICK_FILES = ["clob-book.jsonl.zst", "clob-raw.jsonl.zst", "chainlink.jsonl.zst"] as const;
 
 export interface SeriesSlimStats {
   series: string;
