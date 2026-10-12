@@ -500,7 +500,7 @@ export class MarketRecorder {
     return makeStoredTickId(windowStart, this.chainlinkSeq).replace(":", ":cl:");
   }
 
-  /** Health still counts socket messages. Replay stores the top-5 book, not the payload. */
+  /** Health still counts socket messages. Replay stores the top-3 book, not the payload. */
   private recordClobBookUpdate(event: {
     tMs: number;
     payload: unknown;
@@ -555,14 +555,6 @@ export class MarketRecorder {
       windowEnd: this.activeWindow.windowEnd,
       tMs,
       ptbCrossings: this.activeWindow.ptbCrossings,
-      minAssetPrice:
-        this.activeWindow.minAssetPrice != null
-          ? roundTo4(this.activeWindow.minAssetPrice)
-          : undefined,
-      maxAssetPrice:
-        this.activeWindow.maxAssetPrice != null
-          ? roundTo4(this.activeWindow.maxAssetPrice)
-          : undefined,
     };
 
     if (this.assetPrices.assetPrice != null) {

@@ -178,7 +178,7 @@ function applyMessage(yes: SideBook, no: SideBook, yesTokenId: string, noTokenId
 
 /**
  * Replay slim or full raw CLOB lines into YES/NO book snapshots.
- * One line each time the top 5 on any side changes.
+ * One line each time the top 3 on any side changes.
  */
 export function replayRawToBookLines(
   rows: Array<{ tMs?: unknown; payload?: unknown }>,

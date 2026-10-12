@@ -234,29 +234,21 @@ export async function stampOfficialChainlinkCloseTip(
   if (mid.length === 0) return "skipped-no-ticks";
 
   const close = roundTo4(opts.closePrice);
-  const ptb = roundTo4(opts.priceToBeat);
   const existingTips = expanded.filter((t) => t.tMs >= endMs - tipEpsMs);
   const tipMatch =
     existingTips.length === 1 &&
     existingTips[0]!.tMs === endMs &&
-    Number(existingTips[0]!.assetPrice) === close &&
-    Number(existingTips[0]!.prevCloseAsset) === ptb;
+    Number(existingTips[0]!.assetPrice) === close;
   if (tipMatch && mid.length + existingTips.length === expanded.length) {
     return "unchanged";
   }
 
-  const lastMid = mid[mid.length - 1]!;
   const tip: ChainlinkTickDocument = {
     _id: `${windowStart}:gamma-close`,
     windowStart,
     windowEnd,
     tMs: endMs,
     assetPrice: close,
-    prevCloseAsset: ptb,
-    priceToBeatSource: "gamma",
-    ptbCrossings: lastMid.ptbCrossings,
-    minAssetPrice: lastMid.minAssetPrice,
-    maxAssetPrice: lastMid.maxAssetPrice,
   };
 
   await writeJsonlFile(filePath, [

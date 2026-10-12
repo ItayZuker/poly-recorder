@@ -115,7 +115,6 @@ export const REMOVED_RECORDED_WINDOW_FIELDS = [
   "clobRawCount",
   "clobBookCount",
   "chainlinkCount",
-  "ptbCrossings",
   "assetGap",
   "rangeTop",
   "rangeBottom",
@@ -132,6 +131,7 @@ const WINDOW_SUMMARY_PROJECTION = {
   windowEnd: 1,
   savedAt: 1,
   windowOutcome: 1,
+  ptbCrossings: 1,
   minAssetPrice: 1,
   maxAssetPrice: 1,
   prevCloseAsset: 1,
@@ -144,6 +144,7 @@ const WINDOW_SUMMARY_PROJECTION = {
   "window.windowEnd": 1,
   "window.savedAt": 1,
   "window.windowOutcome": 1,
+  "window.ptbCrossings": 1,
   "window.minAssetPrice": 1,
   "window.maxAssetPrice": 1,
   "window.prevCloseAsset": 1,
@@ -190,11 +191,13 @@ function normalizeDoc(doc: MongoRecordedWindowDoc): RecordedWindowSummary | null
   const maxAssetPrice = doc.maxAssetPrice ?? nested?.maxAssetPrice;
   const prevCloseAsset = doc.prevCloseAsset ?? nested?.prevCloseAsset;
   const assetPrice = doc.assetPrice ?? nested?.assetPrice;
+  const ptbCrossings = doc.ptbCrossings ?? nested?.ptbCrossings;
 
   if (minAssetPrice != null && Number.isFinite(minAssetPrice)) out.minAssetPrice = minAssetPrice;
   if (maxAssetPrice != null && Number.isFinite(maxAssetPrice)) out.maxAssetPrice = maxAssetPrice;
   if (prevCloseAsset != null && Number.isFinite(prevCloseAsset)) out.prevCloseAsset = prevCloseAsset;
   if (assetPrice != null && Number.isFinite(assetPrice)) out.assetPrice = assetPrice;
+  if (ptbCrossings != null && Number.isFinite(ptbCrossings)) out.ptbCrossings = ptbCrossings;
   if (doc.gammaPtb != null && Number.isFinite(doc.gammaPtb)) out.gammaPtb = doc.gammaPtb;
   if (doc.ptbChainlink != null && Number.isFinite(doc.ptbChainlink)) {
     out.ptbChainlink = doc.ptbChainlink;
@@ -223,6 +226,7 @@ export function summaryToRecordedWindow(summary: RecordedWindowSummary): Recorde
     windowOutcome: summary.windowOutcome,
     minAssetPrice: summary.minAssetPrice,
     maxAssetPrice: summary.maxAssetPrice,
+    ptbCrossings: summary.ptbCrossings,
     tickCount: summary.tickCount ?? 0,
   };
 }
@@ -244,6 +248,7 @@ function buildWindowSet(
   };
   setNum($set, "minAssetPrice", window.minAssetPrice);
   setNum($set, "maxAssetPrice", window.maxAssetPrice);
+  setNum($set, "ptbCrossings", window.ptbCrossings ?? 0);
   setNum($set, "prevCloseAsset", window.prevCloseAsset);
   setNum($set, "assetPrice", window.assetPrice);
   if (window.gammaPtb != null && Number.isFinite(window.gammaPtb)) {
@@ -275,6 +280,7 @@ const NESTED_KEPT_FIELDS = [
   "gammaPtb",
   "minAssetPrice",
   "maxAssetPrice",
+  "ptbCrossings",
 ] as const;
 
 function keptValue(value: unknown): unknown | undefined {

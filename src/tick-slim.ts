@@ -1,6 +1,6 @@
 /** Published Replay tick lines: only the fields the trading app still reads. */
 
-const BOOK_LEVELS = 5;
+const BOOK_LEVELS = 3;
 
 export type TickFileKind = "chainlink" | "clob-raw";
 
@@ -31,21 +31,107 @@ function isCompactChainlink(doc: Record<string, unknown>): boolean {
     (doc["1"] != null || doc["2"] != null || doc["3"] != null);
 }
 
-/** Named slim chainlink object. Reads full named lines and both compact numeric layouts. */
+/**
+ * Pre-derived compact layout: ptbCrossings is "6", running low/high are "7"/"8".
+ * Current layout keeps ptbCrossings at "5" and the running low/high at "6"/"7".
+ */
+function isLegacyCompactChainlink(doc: Record<string, unknown>): boolean {
+  return doc["8"] !== undefined || doc["9"] !== undefined || doc["10"] !== undefined || doc["11"] !== undefined;
+}
+
+function usesNamedChainlinkKeys(doc: Record<string, unknown>): boolean {
+  return (
+    doc.tMs !== undefined ||
+    doc.assetPrice !== undefined ||
+    doc.windowStart !== undefined ||
+    doc.windowEnd !== undefined ||
+    doc.prevCloseAsset !== undefined ||
+    doc.ptbCrossings !== undefined ||
+    doc.minAssetPrice !== undefined ||
+    doc.maxAssetPrice !== undefined ||
+    doc.priceToBeatSource !== undefined ||
+    doc.assetGap !== undefined ||
+    doc.assetRange !== undefined ||
+    doc.rangeTop !== undefined ||
+    doc.rangeBottom !== undefined
+  );
+}
+
+function dropKey(doc: Record<string, unknown>, key: string): boolean {
+  if (!Object.prototype.hasOwnProperty.call(doc, key)) return false;
+  delete doc[key];
+  return true;
+}
+
+/**
+ * Remove the running low/high from one Chainlink tick.
+ * Named lines lose minAssetPrice and maxAssetPrice.
+ * Current numeric lines lose "6" and "7". Legacy numeric lines lose "7" and "8"
+ * so ptbCrossings at "6" stays.
+ */
+export function stripChainlinkRangeFields(doc: Record<string, unknown>): boolean {
+  if (usesNamedChainlinkKeys(doc)) {
+    const droppedMin = dropKey(doc, "minAssetPrice");
+    const droppedMax = dropKey(doc, "maxAssetPrice");
+    return droppedMin || droppedMax;
+  }
+  if (isLegacyCompactChainlink(doc)) {
+    const droppedMin = dropKey(doc, "7");
+    const droppedMax = dropKey(doc, "8");
+    return droppedMin || droppedMax;
+  }
+  const droppedMin = dropKey(doc, "6");
+  const droppedMax = dropKey(doc, "7");
+  return droppedMin || droppedMax;
+}
+
+/** Chainlink line stored on disk: time and asset price. Window fields stay on the Mongo header. */
 export function slimChainlinkTick(doc: Record<string, unknown>): Record<string, unknown> {
   const compact = isCompactChainlink(doc);
   const tMs = finiteNumber(compact ? doc["2"] : doc.tMs);
   const assetPrice = finiteNumber(compact ? doc["3"] : doc.assetPrice);
-  const prevCloseAsset = finiteNumber(compact ? doc["4"] : doc.prevCloseAsset);
-  const source = doc.priceToBeatSource;
   const out: Record<string, unknown> = {};
   if (tMs !== undefined) out.tMs = tMs;
   if (assetPrice !== undefined) out.assetPrice = assetPrice;
-  if (prevCloseAsset !== undefined) out.prevCloseAsset = prevCloseAsset;
-  if (source === "chainlink" || source === "rest" || source === "gamma") {
-    out.priceToBeatSource = source;
-  }
   return out;
+}
+
+/**
+ * Drop running low/high from each Chainlink JSONL line. Other fields stay.
+ * Throws TickSlimParseError on a line that is not a JSON object.
+ */
+export function stripChainlinkRangeJsonl(text: string): { text: string; changed: boolean; lines: number } {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let changed = false;
+  let linesIn = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (!line.trim()) {
+      out.push(line);
+      continue;
+    }
+    linesIn += 1;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch (err) {
+      throw new TickSlimParseError(
+        `line ${i + 1}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new TickSlimParseError(`line ${i + 1}: expected a JSON object`);
+    }
+    const doc = parsed as Record<string, unknown>;
+    if (stripChainlinkRangeFields(doc)) {
+      changed = true;
+      out.push(JSON.stringify(doc));
+    } else {
+      out.push(line);
+    }
+  }
+  return { text: out.join("\n"), changed, lines: linesIn };
 }
 
 function slimLevels(
